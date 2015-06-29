@@ -2,6 +2,6 @@
 
 <ul>
 <% @group.users.each do |user| %>
-    <li><%= user %></li>
+    <li><%=h user %></li>
 <% end %>
 </ul>

@@ -70,6 +70,15 @@ class IssueTest < ActiveSupport::TestCase
     assert_nil issue.estimated_hours
   end
 
+  def test_create_with_all_fields_disabled
+    tracker = Tracker.find(1)
+    tracker.core_fields = []
+    tracker.save!
+
+    issue = Issue.new(:project_id => 1, :tracker_id => 1, :author_id => 3, :subject => 'test_create_with_all_fields_disabled')
+    assert_save issue
+  end
+
   def test_start_date_format_should_be_validated
     set_language_if_valid 'en'
     ['2012', 'ABC', '2012-15-20'].each do |invalid_date|
@@ -502,6 +511,38 @@ class IssueTest < ActiveSupport::TestCase
     assert_equal 'MySQL', issue.custom_field_value(1)
   end
 
+  def test_changing_tracker_should_clear_disabled_core_fields
+    tracker = Tracker.find(2)
+    tracker.core_fields = tracker.core_fields - %w(due_date)
+    tracker.save!
+
+    issue = Issue.generate!(:tracker_id => 1, :start_date => Date.today, :due_date => Date.today)
+    issue.save!
+
+    issue.tracker_id = 2
+    issue.save!
+    assert_not_nil issue.start_date
+    assert_nil issue.due_date
+  end
+
+  def test_changing_tracker_should_not_add_cleared_fields_to_journal
+    tracker = Tracker.find(2)
+    tracker.core_fields = tracker.core_fields - %w(due_date)
+    tracker.save!
+
+    issue = Issue.generate!(:tracker_id => 1, :due_date => Date.today)
+    issue.save!
+
+    assert_difference 'Journal.count' do
+      issue.init_journal User.find(1)
+      issue.tracker_id = 2
+      issue.save!
+      assert_nil issue.due_date
+    end
+    journal = Journal.order('id DESC').first
+    assert_equal 1, journal.details.count
+  end
+
   def test_reload_should_reload_custom_field_values
     issue = Issue.generate!
     issue.custom_field_values = {'2' => 'Foo'}
@@ -860,29 +901,6 @@ class IssueTest < ActiveSupport::TestCase
     assert issue.save
   end
 
-  def test_required_custom_field_that_is_not_visible_for_the_user_should_not_be_required
-    CustomField.delete_all
-    field = IssueCustomField.generate!(:is_required => true, :visible => false, :role_ids => [1], :trackers => Tracker.all, :is_for_all => true)
-    user = User.generate!
-    User.add_to_project(user, Project.find(1), Role.find(2))
-
-    issue = Issue.new(:project_id => 1, :tracker_id => 1, :status_id => 1,
-                      :subject => 'Required fields', :author => user)
-    assert_save issue
-  end
-
-  def test_required_custom_field_that_is_visible_for_the_user_should_be_required
-    CustomField.delete_all
-    field = IssueCustomField.generate!(:is_required => true, :visible => false, :role_ids => [1], :trackers => Tracker.all, :is_for_all => true)
-    user = User.generate!
-    User.add_to_project(user, Project.find(1), Role.find(1))
-
-    issue = Issue.new(:project_id => 1, :tracker_id => 1, :status_id => 1,
-                      :subject => 'Required fields', :author => user)
-    assert !issue.save
-    assert_include "#{field.name} cannot be blank", issue.errors.full_messages
-  end
-
   def test_required_attribute_names_for_multiple_roles_should_intersect_rules
     WorkflowPermission.delete_all
     WorkflowPermission.create!(:old_status_id => 1, :tracker_id => 1,
@@ -979,6 +997,27 @@ class IssueTest < ActiveSupport::TestCase
 
     assert_equal %w(due_date), issue.required_attribute_names(user)
     assert_equal %w(done_ratio start_date), issue.read_only_attribute_names(user).sort
+  end
+
+  def test_workflow_rules_should_work_for_member_with_duplicate_role
+    WorkflowPermission.delete_all
+    WorkflowPermission.create!(:old_status_id => 1, :tracker_id => 1,
+                               :role_id => 1, :field_name => 'due_date',
+                               :rule => 'required')
+    WorkflowPermission.create!(:old_status_id => 1, :tracker_id => 1,
+                               :role_id => 1, :field_name => 'start_date',
+                               :rule => 'readonly')
+
+    user = User.generate!
+    m = Member.new(:user_id => user.id, :project_id => 1)
+    m.member_roles.build(:role_id => 1)
+    m.member_roles.build(:role_id => 1)
+    m.save!
+
+    issue = Issue.new(:project_id => 1, :tracker_id => 1, :status_id => 1)
+
+    assert_equal %w(due_date), issue.required_attribute_names(user)
+    assert_equal %w(start_date), issue.read_only_attribute_names(user)
   end
 
   def test_copy

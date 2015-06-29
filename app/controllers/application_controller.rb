@@ -63,9 +63,9 @@ class ApplicationController < ActionController::Base
     if session[:user_id]
       if session_expired? && !try_to_autologin
         set_localization(User.active.find_by_id(session[:user_id]))
-        reset_session
+        self.logged_user = nil
         flash[:error] = l(:error_session_expired)
-        redirect_to signin_url
+        require_login
       else
         session[:atime] = Time.now.utc.to_i
       end
@@ -240,11 +240,11 @@ class ApplicationController < ActionController::Base
           if request.xhr?
             head :unauthorized
           else
-            redirect_to signin_path(:back_url => url)
+            redirect_to :controller => "account", :action => "login", :back_url => url
           end
         }
         format.any(:atom, :pdf, :csv) {
-          redirect_to signin_path(:back_url => url)
+          redirect_to :controller => "account", :action => "login", :back_url => url
         }
         format.xml  { head :unauthorized, 'WWW-Authenticate' => 'Basic realm="Redmine API"' }
         format.js   { head :unauthorized, 'WWW-Authenticate' => 'Basic realm="Redmine API"' }

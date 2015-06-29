@@ -254,10 +254,4 @@ class Repository::Git < Repository
     save(:validate => false)
   end
   private :clear_extra_info_of_changesets
-
-  def clear_changesets
-    super
-    clear_extra_info_of_changesets
-  end
-  private :clear_changesets
 end

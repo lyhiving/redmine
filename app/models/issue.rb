@@ -96,6 +96,7 @@ class Issue < ActiveRecord::Base
     ids.any? ? where(:fixed_version_id => ids) : where('1=0')
   }
 
+  before_validation :clear_disabled_fields
   before_create :default_assign
   before_save :close_duplicates, :update_done_ratio_from_issue_status,
               :force_updated_on_change, :update_closed_on, :set_assigned_to_was
@@ -292,7 +293,7 @@ class Issue < ActiveRecord::Base
   # * or if the status was not part of the new tracker statuses
   # * or the status was nil
   def tracker=(tracker)
-    if tracker != self.tracker
+    if tracker != self.tracker 
       if status == default_status
         self.status = nil
       elsif status && tracker && !tracker.issue_status_ids.include?(status.id)
@@ -659,17 +660,6 @@ class Issue < ActiveRecord::Base
     end
   end
 
-  # Overrides Redmine::Acts::Customizable::InstanceMethods#validate_custom_field_values
-  # so that custom values that are not editable are not validated (eg. a custom field that
-  # is marked as required should not trigger a validation error if the user is not allowed
-  # to edit this field).
-  def validate_custom_field_values
-    user = new_record? ? author : current_journal.try(:user)
-    if new_record? || custom_field_values_changed?
-      editable_custom_field_values(user).each(&:validate_value)
-    end
-  end
-
   # Set the done_ratio using the status if that setting is set.  This will keep the done_ratios
   # even if the user turns off the setting later
   def update_done_ratio_from_issue_status
@@ -689,7 +679,11 @@ class Issue < ActiveRecord::Base
 
   # Returns the names of attributes that are journalized when updating the issue
   def journalized_attribute_names
-    Issue.column_names - %w(id root_id lft rgt lock_version created_on updated_on closed_on)
+    names = Issue.column_names - %w(id root_id lft rgt lock_version created_on updated_on closed_on)
+    if tracker
+      names -= tracker.disabled_core_fields
+    end
+    names
   end
 
   # Returns the id of the last journal or nil
@@ -1589,5 +1583,14 @@ class Issue < ActiveRecord::Base
   def clear_assigned_to_was
     @assigned_to_was = nil
     @previous_assigned_to_id = nil
+  end
+
+  def clear_disabled_fields
+    if tracker
+      tracker.disabled_core_fields.each do |attribute|
+        send "#{attribute}=", nil
+      end
+      self.done_ratio ||= 0
+    end
   end
 end
